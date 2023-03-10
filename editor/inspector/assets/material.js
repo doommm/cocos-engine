@@ -4,6 +4,58 @@ const { materialTechniquePolyfill } = require('../utils/material');
 const { setDisabled, setReadonly, setHidden, loopSetAssetDumpDataReadonly } = require('../utils/prop');
 const { join, sep, normalize } = require('path');
 
+const effectGroupNameRE = /^db:\/\/(\w+)\//i; // match root DB name
+const effectDirRE = /^effects\//i;
+
+/**
+ * 
+ * @param {{name: string; uuid: string; path: string}[]} sortedEffects 
+ * @returns html template
+ */
+function renderGroupEffectOptions(sortedEffects) {
+    const groupNames = new Set();
+
+    let htmlTemplate = '';
+    let currGroup = '';
+
+    for (const effect of sortedEffects) {
+        const groupName = effectGroupNameRE.exec(effect.path)?.[1] ?? '';
+        let optionLabel = effect.path;
+
+        // complete prev group
+        if (currGroup !== '' && currGroup !== groupName) {
+            htmlTemplate += '</optgroup>';
+        }
+
+        if (groupName !== '') {
+            if (!groupNames.has(groupName)) {
+                groupNames.add(groupName);
+
+                currGroup = groupName;
+
+                htmlTemplate += `<optgroup label="${groupName}">`;
+            }
+
+            // for option label, remove group name if matched
+            optionLabel = optionLabel.replace(effectGroupNameRE, '');
+        }
+
+        // remove prefix 'effects'(after 'db://' prefix removed)
+        if (effectDirRE.test(optionLabel)) {
+            optionLabel = optionLabel.replace(effectDirRE, '');
+        }
+
+        // use full name as option value
+        htmlTemplate += `<option value="${effect.name}" data-uuid="${effect.uuid}">${optionLabel}</option>\n`;
+    }
+
+    if (currGroup !== '') {
+        htmlTemplate += '</optgroup>';
+    }
+
+    return htmlTemplate;
+}
+
 exports.style = `
 .invalid { display: none; }
 .invalid[active] { display: block; }
@@ -104,22 +156,18 @@ exports.methods = {
 
     async updateEffect() {
         const effectMap = await Editor.Message.request('scene', 'query-all-effects');
-        this.effects = Object.keys(effectMap).sort().filter((name) => {
-            const effect = effectMap[name];
-            return !effect.hideInEditor;
-        }).map((name) => {
-            const effect = effectMap[name];
-            return {
-                name,
-                uuid: effect.uuid,
-            };
-        });
 
-        let effectOption = '';
-        for (let effect of this.effects) {
-            effectOption += `<option>${effect.name}</option>`;
-        }
-        this.$.effect.innerHTML = effectOption;
+        this.effects = Object.keys(effectMap).sort().reduce((arr, name) => {
+            const effect = effectMap[name];
+            if (!effect.hideInEditor) {
+                arr.push(effect);
+            }
+            return arr;
+        }, []);
+
+        const effectOptionsHTML = renderGroupEffectOptions(this.effects);
+
+        this.$.effect.innerHTML = effectOptionsHTML;
 
         this.$.effect.value = this.material.effect;
         setDisabled(this.asset.readonly, this.$.effect);
